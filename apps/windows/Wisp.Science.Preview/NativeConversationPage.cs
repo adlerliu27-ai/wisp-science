@@ -23,6 +23,8 @@ internal sealed class NativeConversationPage : UserControl, IDisposable
     private readonly Button createSession = new() { Content = "新建会话" };
     private readonly Button attach = new() { Content = "对话附件" };
     private readonly Button queue = new() { Content = "排队后续" };
+    private readonly Button retry = new() { Content = "重新读取" };
+    private readonly Button acknowledge = new() { Content = "已检查，允许再次发送或排队…" };
     private readonly StackPanel attachments = new() { Spacing = 4 };
     private readonly TextBlock status = new() { TextWrapping = TextWrapping.Wrap, FontSize = 12 };
     private readonly TextBlock hint = new() { FontSize = 11 };
@@ -34,19 +36,19 @@ internal sealed class NativeConversationPage : UserControl, IDisposable
     public NativeConversationPage(WorkspaceConversationModel model, WispDesign design, Action<string> quote, Func<Task> create, Func<Task<string?>>? pickAttachment = null)
     {
         this.model = model; this.design = design; this.quote = quote; this.create = create;
+        design.BindTypography(status, 12); design.BindTypography(hint, 11);
         model.Changed += Refresh;
+        design.TypographyChanged += Refresh;
         var root = new Grid();
         root.RowDefinitions.Add(new() { Height = GridLength.Auto });
         root.RowDefinitions.Add(new() { Height = new GridLength(1, GridUnitType.Star) });
         root.RowDefinitions.Add(new() { Height = GridLength.Auto });
         root.RowDefinitions.Add(new() { Height = GridLength.Auto });
         status.Margin = new Thickness(24, 12, 24, 0);
-        var retry = new Button { Content = "重新读取" };
         retry.Click += async (_, _) => await model.RefreshAsync(lifetime.Token);
-        var ack = new Button { Content = "已检查，允许再次发送或排队…" };
-        ack.Click += (_, _) => model.AcknowledgeUncertainSend();
+        acknowledge.Click += (_, _) => model.AcknowledgeUncertainSend();
         var banner = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new Thickness(24, 8, 24, 0) };
-        banner.Children.Add(retry); banner.Children.Add(ack);
+        banner.Children.Add(retry); banner.Children.Add(acknowledge);
         var header = new StackPanel(); header.Children.Add(status); header.Children.Add(banner);
         root.Children.Add(header);
         scroll.Content = transcript; Grid.SetRow(scroll, 1); root.Children.Add(scroll);
@@ -94,7 +96,7 @@ internal sealed class NativeConversationPage : UserControl, IDisposable
         composerBar.RowDefinitions.Add(new() { Height = GridLength.Auto });
         composerBar.RowDefinitions.Add(new() { Height = GridLength.Auto });
         var empty = new StackPanel { Spacing = 12, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(24) };
-        empty.Children.Add(new TextBlock { Text = "开始新的研究对话", FontSize = 22, HorizontalAlignment = HorizontalAlignment.Center });
+        var emptyHeading = design.Text("开始新的研究对话", 22); emptyHeading.HorizontalAlignment = HorizontalAlignment.Center; empty.Children.Add(emptyHeading);
         empty.Children.Add(createSession);
         composerBar.Children.Add(empty);
         var border = new Border { Child = card, CornerRadius = new CornerRadius(14), BorderThickness = new Thickness(1), Margin = new Thickness(24, 0, 24, 8), MaxWidth = 850 };
@@ -123,7 +125,11 @@ internal sealed class NativeConversationPage : UserControl, IDisposable
     public void Refresh()
     {
         if (disposed) return;
+        FontFamily = design.Font(); FontSize = design.FontSize(14);
+        composer.FontFamily = design.Font(); composer.FontSize = design.FontSize(14);
         var error = model.ConnectionError ?? model.OperationError ?? model.Snapshot?.Error;
+        retry.Visibility = error != null ? Visibility.Visible : Visibility.Collapsed;
+        acknowledge.Visibility = model.UncertainSend ? Visibility.Visible : Visibility.Collapsed;
         status.Text = error ?? "";
         status.Foreground = design.Brush(error == null ? "text-muted" : "clay-strong");
         status.Visibility = error == null && !model.UncertainSend ? Visibility.Collapsed : Visibility.Visible;
@@ -154,6 +160,7 @@ internal sealed class NativeConversationPage : UserControl, IDisposable
         models.IsEnabled = !model.Busy && model.Snapshot is { Running: false, ReadOnly: false };
         RenderTranscript();
         RenderApprovals();
+        design.ApplyTypography(this);
         if (followLatest && !model.ShowingHistory) scroll.ChangeView(null, scroll.ScrollableHeight, null);
     }
 
@@ -201,8 +208,8 @@ internal sealed class NativeConversationPage : UserControl, IDisposable
             else if (item.Role == "tool")
             {
                 var body = new StackPanel { Spacing = 8 };
-                if (!string.IsNullOrEmpty(item.Input)) body.Children.Add(new TextBox { Text = item.Input, IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap });
-                body.Children.Add(new TextBox { Text = item.Text, IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap });
+                if (!string.IsNullOrEmpty(item.Input)) body.Children.Add(new TextBox { Text = item.Input, IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, FontFamily = design.Font(true), FontSize = design.FontSize(12, true) });
+                body.Children.Add(new TextBox { Text = item.Text, IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, FontFamily = design.Font(true), FontSize = design.FontSize(12, true) });
                 card.Children.Add(new Expander { Header = item.Text.Length == 0 ? "执行中…" : item.Text[..Math.Min(180, item.Text.Length)], Content = body, IsExpanded = item.Ok == false });
             }
             else
@@ -241,7 +248,7 @@ internal sealed class NativeConversationPage : UserControl, IDisposable
             card.Children.Add(new TextBlock { Text = "需要确认 · " + approval.Tool, FontSize = 13 });
             card.Children.Add(new TextBlock { Text = approval.Message, TextWrapping = TextWrapping.Wrap });
             if (approval.Preview.Length > 0)
-                card.Children.Add(new TextBox { Text = approval.Preview, IsReadOnly = true, AcceptsReturn = true, FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Consolas"), MaxHeight = 130 });
+                card.Children.Add(new TextBox { Text = approval.Preview, IsReadOnly = true, AcceptsReturn = true, FontFamily = design.Font(true), FontSize = design.FontSize(12, true), MaxHeight = 130 });
             var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Right };
             var deny = new Button { Content = "拒绝", IsEnabled = !model.Busy && model.ConnectionError == null };
             deny.Click += async (_, _) => await model.ApproveAsync(captured, false, lifetime.Token);
@@ -255,6 +262,6 @@ internal sealed class NativeConversationPage : UserControl, IDisposable
     public void Dispose()
     {
         if (disposed) return;
-        disposed = true; lifetime.Cancel(); model.Changed -= Refresh; model.Pause(); lifetime.Dispose();
+        disposed = true; lifetime.Cancel(); model.Changed -= Refresh; design.TypographyChanged -= Refresh; model.Pause(); lifetime.Dispose();
     }
 }

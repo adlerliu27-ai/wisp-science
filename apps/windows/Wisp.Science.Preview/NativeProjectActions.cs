@@ -28,19 +28,32 @@ internal abstract class NativeActionPage : WorkspaceSheet
     protected void Update()
     {
         if (State.Closed) return;
+        Design.ApplyTypography(Form); Design.ApplyTypography(Results);
         formHost.IsEnabled = !State.Busy; resultsHost.IsEnabled = !State.Busy;
         progress.Visibility = State.Busy ? Visibility.Visible : Visibility.Collapsed;
         error.Text = State.Error ?? ""; error.Visibility = State.Error == null ? Visibility.Collapsed : Visibility.Visible;
     }
+    protected void SetContentEnabled(bool enabled) { formHost.IsEnabled = resultsHost.IsEnabled = enabled; }
     protected TextBox Field(string title, string text, Action<string> changed, bool multiline = false)
     {
         var input = new TextBox { Header = title, Text = text, AcceptsReturn = multiline, TextWrapping = TextWrapping.Wrap, MinHeight = multiline ? 85 : 32 };
+        Design.BindTypography(input);
         input.TextChanged += (_, _) => changed(input.Text); Form.Children.Add(input); return input;
     }
-    protected static Button Button(string title, Func<Task> action)
+    protected Button Button(string title, Func<Task> action)
     {
         var button = new Button { Content = title };
+        Design.BindTypography(button);
         button.Click += async (_, _) => await action(); return button;
+    }
+    protected Expander Disclosure(string title, UIElement content, bool expanded = false)
+    {
+        var expander = new Expander { Header = Design.Text(title), Content = content,
+            IsExpanded = expanded, HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(expander, title);
+        Design.ApplyTypography(expander);
+        return expander;
     }
     public override void HandleEscape()
     {
@@ -140,28 +153,43 @@ internal sealed class NativePublicationPage : NativeActionPage
 {
     private readonly WorkspacePublicationModel model;
     private readonly TextBox title, description, revision;
+    private readonly Button create;
     public NativePublicationPage(WorkspacePublicationModel model, WispDesign design, Action close) : base(design, "论文证据", model, close)
     {
         this.model = model;
-        title = Field("论文标题", model.Title, s => model.Title = s);
+        title = Field("论文标题", model.Title, s => { model.Title = s; UpdateCreate(); });
         description = Field("描述", model.Description, s => model.Description = s, true);
-        revision = Field("版本标签", model.RevisionLabel, s => model.RevisionLabel = s);
-        Form.Children.Add(Button("创建论文证据", async () =>
+        revision = Field("版本标签", model.RevisionLabel, s => { model.RevisionLabel = s; UpdateCreate(); });
+        create = Button("创建论文证据", async () =>
         {
             if (await model.CreateAsync()) { title.Text = model.Title; description.Text = model.Description; revision.Text = model.RevisionLabel; }
             RenderItems();
-        }));
+        });
+        Form.Children.Add(create);
+        model.Changed += UpdateCreate;
+        UpdateCreate();
         Form.Children.Add(Button("刷新", Load)); _ = Load();
     }
+    private void UpdateCreate()
+    {
+        if (create == null || model.Closed) return;
+        var visibility = model.CreationAvailable ? Visibility.Visible : Visibility.Collapsed;
+        title.Visibility = description.Visibility = revision.Visibility = create.Visibility = visibility;
+        create.IsEnabled = model.CanCreate;
+    }
+    public override void Dispose() { model.Changed -= UpdateCreate; base.Dispose(); }
     private async Task Load() { await model.LoadAsync(); RenderItems(); }
     private void RenderItems()
     {
         if (model.Closed) return;
         Results.Children.Clear();
         if (model.Workspace is not { } value) return;
-        foreach (var publication in value.Publications) Results.Children.Add(new TextBlock { Text = publication.Title + "\n" + publication.Description, TextWrapping = TextWrapping.Wrap });
-        if (value.Revision is { } version) Results.Children.Add(Mute(version.Label + " · " + version.State));
-        foreach (var item in value.Items.OrderBy(i => i.Ordinal)) Results.Children.Add(Mute(item.Kind + " · " + item.Title));
+        if (value.Publication is { } publication)
+        {
+            Results.Children.Add(new TextBlock { Text = publication.Title + "\n" + publication.Description, TextWrapping = TextWrapping.Wrap });
+            if (value.Revision is { } version) Results.Children.Add(Mute(version.Label + " · " + version.State));
+            foreach (var item in value.Items.OrderBy(i => i.Ordinal)) Results.Children.Add(Mute(item.Kind + " · " + item.Title));
+        }
         if (value.Publications.Count == 0) Results.Children.Add(Mute("尚无论文证据"));
     }
 }

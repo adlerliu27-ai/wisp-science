@@ -55,6 +55,7 @@ internal sealed partial class MainWindow : Window
         Title = "Wisp Science · WinUI 3 Preview";
         AppWindow.Resize(new Windows.Graphics.SizeInt32(1220, 860));
         Content = root;
+        design.Typography = settings.Typography ?? new();
         root.KeyboardAcceleratorPlacementMode = KeyboardAcceleratorPlacementMode.Hidden;
         root.RequestedTheme = settings.Appearance switch { "light" => ElementTheme.Light, "dark" => ElementTheme.Dark, _ => ElementTheme.Default };
         panelVisible = settings.PanelVisible;
@@ -122,7 +123,7 @@ internal sealed partial class MainWindow : Window
             recovery.Children.Add(ActionButton("返回项目", "arrow-left", model.GoHome, true));
             root.Children.Add(recovery);
         }
-        finally { rendering = false; }
+        finally { design.ApplyTypography(root, settingsPage); rendering = false; }
     }
 
     private void RenderCore()
@@ -238,7 +239,7 @@ internal sealed partial class MainWindow : Window
             var options = Row(2); options.VerticalAlignment = VerticalAlignment.Center;
             var star = ActionButton(project.Starred ? "取消收藏" : "收藏项目", project.Starred ? "star-filled" : "star", () => _ = model.SetStarredAsync(project.Id, !project.Starred), quiet: true);
             star.IsEnabled = !model.Loading; options.Children.Add(star);
-            options.Children.Add(ActionButton("项目设置", "gear", quiet: true));
+            options.Children.Add(ActionButton("项目设置", "gear", () => OpenSettingsSection("project", project.Id), quiet: true));
             Grid.SetColumn(options, 1); cardRow.Children.Add(options);
             var card = Card(cardRow, 4);
             var menu = new MenuFlyout();
@@ -381,7 +382,7 @@ internal sealed partial class MainWindow : Window
         AutomationProperties.SetName(switcher, "切换项目");
         var menu = new MenuFlyout();
         var projectSettings = new MenuFlyoutItem { Text = "项目设置" };
-        projectSettings.Click += (_, _) => OpenSettings();
+        projectSettings.Click += (_, _) => OpenSettingsSection("project", project.Id);
         menu.Items.Add(projectSettings);
         menu.Items.Add(new MenuFlyoutSeparator());
         foreach (var item in model.Projects)
@@ -698,19 +699,24 @@ internal sealed partial class MainWindow : Window
     }
 
     private void OpenSettings()
+        => OpenSettingsSection("appearance");
+
+    private void OpenSettingsSection(string initialSection, string? projectId = null)
     {
         if (settingsPage != null) return;
         CloseSheet();
-        settingsPage = new NativeSettingsPage(model.DatabasePath, model.ActiveProjectId, prefs =>
+        settingsPage = new NativeSettingsPage(model.DatabasePath, projectId ?? model.ActiveProjectId, prefs =>
         {
             if (windowClosed) return;
             settings.Appearance = prefs["theme"]?.GetValue<string>() ?? "system";
             settings.LightPalette = prefs["light_palette"]?.GetValue<string>() ?? "paper";
             settings.DarkPalette = prefs["dark_palette"]?.GetValue<string>() ?? "charcoal";
+            settings.Typography = NativeTypography.From(prefs);
+            design.Typography = settings.Typography;
             SaveSettings();
             root.RequestedTheme = settings.Appearance switch { "light" => ElementTheme.Light, "dark" => ElementTheme.Dark, _ => ElementTheme.Default };
             Render();
-        }, CloseSettings);
+        }, CloseSettings, initialSection, model.Projects, folder => folder ? PickDirectory() : PickFile("*"), design.Typography);
         if (pageContent != null) pageContent.Visibility = Visibility.Collapsed;
         root.Children.Add(settingsPage);
     }
@@ -722,6 +728,7 @@ internal sealed partial class MainWindow : Window
         settingsPage.Dispose(); settingsPage = null;
         if (pageContent != null) pageContent.Visibility = Visibility.Visible;
         Render();
+        _ = model.RefreshAsync();
     }
 
     private void SaveSettings()
@@ -738,7 +745,7 @@ internal sealed partial class MainWindow : Window
 
     private TextBlock Text(string value, double size = 14, string color = "text") => new()
     {
-        Text = value, FontSize = size, Foreground = design.Brush(color), TextWrapping = TextWrapping.Wrap,
+        Text = value, FontSize = design.FontSize(size), FontFamily = design.Font(), Foreground = design.Brush(color), TextWrapping = TextWrapping.Wrap,
         VerticalAlignment = VerticalAlignment.Center
     };
     private TextBlock SingleLine(string value, double size = 14, string color = "text")
