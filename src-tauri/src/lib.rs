@@ -8016,6 +8016,7 @@ pub fn run() {
                 // Each step is logged as it is entered so a future "exit never
                 // finished" report can name the step it stopped at. Today the log
                 // simply goes quiet here, which is why #1358 stays undiagnosed.
+                let exit_started = std::time::Instant::now();
                 tracing::info!(target: "wisp", step="shutdown-mcp-broker", "app.exit.step");
                 mcp_broker::shutdown();
                 tracing::info!(target: "wisp", step="shutdown-mcp-connections", "app.exit.step");
@@ -8041,6 +8042,11 @@ pub fn run() {
                 _app.state::<terminal_sessions::TerminalManager>()
                     .shutdown_all();
                 tracing::info!(target: "wisp", step="done", "app.exit.step");
+                tracing::info!(
+                    target: "wisp",
+                    elapsed_ms = exit_started.elapsed().as_millis() as u64,
+                    "app.exit.finished"
+                );
             }
         });
 }
